@@ -13,7 +13,10 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from oil_pipeline.extract import load_pdf100
-from oil_pipeline.load import load_parquet_to_bigquery, run_bigquery_sql, save_parquet, save_tables, upload_to_gcs
+from oil_pipeline.load.bigquery import load_parquet_to_bigquery, run_bigquery_sql
+from oil_pipeline.load.duckdb import save_tables
+from oil_pipeline.load.gcs import upload_to_gcs
+from oil_pipeline.load.parquet import save_parquet
 from oil_pipeline.transform import VIEW_QUERIES, build_district_lookup_sql, build_view_sql, transform
 
 RAW_DATA_PATH = Path(__file__).parent / "data" / "raw" / "production" / "PDF100.ebc"
