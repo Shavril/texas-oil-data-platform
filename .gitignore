@@ -216,3 +216,19 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project raw data (Texas Oil Data Platform)
+#   Never commit raw RRC extracts (large, and CLAUDE.md forbids it), but keep
+#   the data/raw/<subfolder>/.gitkeep files so the folder scaffolding is
+#   preserved for anyone cloning the repo.
+data/raw/**
+!data/raw/**/
+!data/raw/**/.gitkeep
+
+# Project database files (Texas Oil Data Platform)
+#   DuckDB table files are large, regenerable local artifacts (see
+#   oil_pipeline/load.py) — never commit them, but keep the folder
+#   scaffolding via .gitkeep.
+data/database/**
+!data/database/**/
+!data/database/**/.gitkeep
