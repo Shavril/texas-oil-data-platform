@@ -75,3 +75,11 @@ def load_parquet_to_bigquery(gcs_uri: str, project: str, dataset: str, table: st
 
     destination = client.get_table(table_ref)
     logger.info("Loaded %s rows into %s from %s", f"{destination.num_rows:,}", table_ref, gcs_uri)
+
+
+def run_bigquery_sql(sql: str, project: str) -> None:
+    """Execute an arbitrary SQL statement (e.g. CREATE OR REPLACE TABLE ... AS SELECT) against BigQuery."""
+    client = bigquery.Client(project=project)
+    job = client.query(sql)
+    job.result()
+    logger.info("Executed BigQuery SQL (job %s)", job.job_id)

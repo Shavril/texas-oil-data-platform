@@ -13,8 +13,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from oil_pipeline.extract import load_pdf100
-from oil_pipeline.load import load_parquet_to_bigquery, save_parquet, save_tables, upload_to_gcs
-from oil_pipeline.transform import transform
+from oil_pipeline.load import load_parquet_to_bigquery, run_bigquery_sql, save_parquet, save_tables, upload_to_gcs
+from oil_pipeline.transform import VIEW_QUERIES, build_district_lookup_sql, build_view_sql, transform
 
 RAW_DATA_PATH = Path(__file__).parent / "data" / "raw" / "production" / "PDF100.ebc"
 DB_PATH = Path(__file__).parent / "data" / "database" / "pdf100.duckdb"
@@ -88,6 +88,21 @@ def load_gcs_to_bigquery(gcs_uris: dict[str, str]) -> None:
         print(f"Loaded {gcs_uri} -> {GCP_PROJECT_ID}.{BQ_DATASET}.{name}")
 
 
+def create_district_lookup_table() -> None:
+    sql = build_district_lookup_sql(project=GCP_PROJECT_ID, dataset=BQ_DATASET)
+    run_bigquery_sql(sql, project=GCP_PROJECT_ID)
+    print()
+    print(f"Created {GCP_PROJECT_ID}.{BQ_DATASET}.rrc_districts")
+
+
+def create_analytics_views() -> None:
+    print()
+    for view_name in VIEW_QUERIES:
+        sql = build_view_sql(GCP_PROJECT_ID, BQ_DATASET, view_name)
+        run_bigquery_sql(sql, project=GCP_PROJECT_ID)
+        print(f"Created {GCP_PROJECT_ID}.{BQ_DATASET}.{view_name}")
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -97,14 +112,20 @@ def main() -> None:
     # Transform into analytics-ready tables
     analytics_tables = transform_duckdb_to_analytics_tables(db_path)
 
-    # Save analytics tables locally as Parquet, then upload to GCS
+    # Save analytics tables locally as Parquet
     parquet_paths = save_analytics_to_parquet(analytics_tables)
 
-    # Upload the Parquet file to GCS
+    # Upload the Parquet files to GCS
     gcs_uris = upload_parquet_to_gcs(parquet_paths)
 
     # Load from GCS into BigQuery
     load_gcs_to_bigquery(gcs_uris)
+
+    # Create/refresh the small static district code/name lookup table
+    create_district_lookup_table()
+
+    # Create/refresh the Looker Studio-facing views
+    create_analytics_views()
 
 
 if __name__ == "__main__":
