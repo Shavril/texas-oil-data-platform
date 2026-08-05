@@ -15,22 +15,22 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from oil_pipeline.extract.p4_operators import load_p4f606
 from oil_pipeline.extract.p5_organizations import load_orf850
 from oil_pipeline.extract.production import load_pdf100
+from oil_pipeline.extract.wells import load_dbf900
 from oil_pipeline.load.bigquery import load_parquet_to_bigquery, run_bigquery_sql
 from oil_pipeline.load.duckdb import save_tables
 from oil_pipeline.load.gcs import upload_to_gcs
 from oil_pipeline.load.parquet import save_parquet
-from oil_pipeline.transform import (
-    VIEW_QUERIES,
-    build_district_lookup_sql,
-    build_lease_operators,
-    build_oil_production,
-    build_view_sql,
-)
+from oil_pipeline.transform.districts import build_district_lookup_sql
+from oil_pipeline.transform.lease_operators import build_lease_operators
+from oil_pipeline.transform.oil_production import build_oil_production
+from oil_pipeline.transform.views import VIEW_QUERIES, build_view_sql
+from oil_pipeline.transform.wells import build_wells
 
 RAW_DATA_PATH = Path(__file__).parent / "data" / "raw" / "production" / "PDF100.ebc"
 P4_DATA_PATH = Path(__file__).parent / "data" / "raw" / "operators" / "p4f606.ebc"
 P5_DATA_PATH = Path(__file__).parent / "data" / "raw" / "organizations" / "orf850.ebc"
-DB_PATH = Path(__file__).parent / "data" / "database" / "pdf100.duckdb"
+WELLS_DATA_PATH = Path(__file__).parent / "data" / "raw" / "wells" / "dbf900.ebc"
+DB_PATH = Path(__file__).parent / "data" / "database" / "analytics.duckdb"
 PROCESSED_DATA_PATH = Path(__file__).parent / "data" / "processed"
 
 GCP_PROJECT_ID = "texas-oil-data-platform"
@@ -75,6 +75,23 @@ def load_p5_to_duckdb() -> None:
     print(f"Saved p5_organizations table to {DB_PATH}")
 
 
+def load_wells_to_duckdb() -> None:
+    wells_results = load_dbf900(WELLS_DATA_PATH)
+    print()
+    print(f"Wells Root:               {len(wells_results['root']):,}")
+    print(f"Wells Completion:         {len(wells_results['completion']):,}")
+    print(f"Wells New Location:       {len(wells_results['new_location']):,}")
+    save_tables(
+        {
+            "wells_root": wells_results["root"],
+            "wells_completion": wells_results["completion"],
+            "wells_new_location": wells_results["new_location"],
+        },
+        DB_PATH,
+    )
+    print(f"Saved wells_root, wells_completion, and wells_new_location tables to {DB_PATH}")
+
+
 def transform_oil_production(db_path: Path) -> pd.DataFrame:
     df = build_oil_production(db_path)
     print()
@@ -93,6 +110,15 @@ def transform_lease_operators(db_path: Path) -> pd.DataFrame:
     return df
 
 
+def transform_wells(db_path: Path) -> pd.DataFrame:
+    df = build_wells(db_path)
+    print()
+    print(f"wells: {len(df):,} rows")
+    save_tables({"wells": df}, db_path)
+    print(f"Saved wells table to {db_path}")
+    return df
+
+
 def save_oil_production_to_parquet(df: pd.DataFrame) -> Path:
     paths = save_parquet({"oil_production": df}, PROCESSED_DATA_PATH)
     print()
@@ -107,6 +133,13 @@ def save_lease_operators_to_parquet(df: pd.DataFrame) -> Path:
     return paths["lease_operators"]
 
 
+def save_wells_to_parquet(df: pd.DataFrame) -> Path:
+    paths = save_parquet({"wells": df}, PROCESSED_DATA_PATH)
+    print()
+    print(f"Wrote wells -> {paths['wells']}")
+    return paths["wells"]
+
+
 def upload_oil_production_to_gcs(path: Path) -> str:
     blob_name = "oil_production.parquet"
     upload_to_gcs(path, GCS_BUCKET_NAME, blob_name, project=GCP_PROJECT_ID)
@@ -118,6 +151,15 @@ def upload_oil_production_to_gcs(path: Path) -> str:
 
 def upload_lease_operators_to_gcs(path: Path) -> str:
     blob_name = "lease_operators.parquet"
+    upload_to_gcs(path, GCS_BUCKET_NAME, blob_name, project=GCP_PROJECT_ID)
+    gcs_uri = f"gs://{GCS_BUCKET_NAME}/{blob_name}"
+    print()
+    print(f"Uploaded {path} -> {gcs_uri}")
+    return gcs_uri
+
+
+def upload_wells_to_gcs(path: Path) -> str:
+    blob_name = "wells.parquet"
     upload_to_gcs(path, GCS_BUCKET_NAME, blob_name, project=GCP_PROJECT_ID)
     gcs_uri = f"gs://{GCS_BUCKET_NAME}/{blob_name}"
     print()
@@ -156,23 +198,29 @@ def main() -> None:
     load_p4_to_duckdb()
     # Load P-5 organization raw data into DuckDB
     load_p5_to_duckdb()
+    # Load wells raw data into DuckDB
+    load_wells_to_duckdb()
 
     # Transform into analytics-ready tables
     oil_production_df = transform_oil_production(db_path)
     lease_operators_df = transform_lease_operators(db_path)
+    wells_df = transform_wells(db_path)
 
     # Save analytics tables locally as Parquet
     oil_production_parquet_path = save_oil_production_to_parquet(oil_production_df)
     lease_operators_parquet_path = save_lease_operators_to_parquet(lease_operators_df)
+    wells_parquet_path = save_wells_to_parquet(wells_df)
 
     # Upload the Parquet files to GCS
     oil_production_gcs_uri = upload_oil_production_to_gcs(oil_production_parquet_path)
     lease_operators_gcs_uri = upload_lease_operators_to_gcs(lease_operators_parquet_path)
+    wells_gcs_uri = upload_wells_to_gcs(wells_parquet_path)
 
     # Load from GCS into BigQuery
     load_gcs_to_bigquery({
         "oil_production": oil_production_gcs_uri,
         "lease_operators": lease_operators_gcs_uri,
+        "wells": wells_gcs_uri,
     })
 
     # Create/refresh the small static district code/name lookup table

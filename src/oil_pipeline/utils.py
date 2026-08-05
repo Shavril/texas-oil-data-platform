@@ -1,6 +1,6 @@
 """Low-level EBCDIC / packed-decimal decoding and fixed-length record streaming
-helpers, shared across all three RRC tape formats used in this project
-(production, P-4 operators, P-5 organizations)."""
+helpers, shared across all four RRC tape formats used in this project
+(production, P-4 operators, P-5 organizations, wellbore)."""
 
 from pathlib import Path
 
@@ -29,6 +29,24 @@ def unpack_comp3(field: bytes) -> int:
 
     value = int("".join(str(d) for d in digits))
     return -value if sign_nibble in _NEGATIVE_SIGN_NIBBLES else value
+
+
+def unpack_zoned_decimal(field: bytes, decimal_places: int = 0) -> float:
+    """Unpack a signed zoned-decimal (COBOL PIC S9(n)V9(m) DISPLAY) field.
+
+    Unlike COMP-3 (packed, two digits per byte), zoned-decimal DISPLAY
+    fields store one digit per byte in the low nibble; the high nibble is
+    normally an unsigned zone (0xF) except on the *last* byte, where it
+    carries the sign via trailing overpunch (0xC/0xF = positive,
+    0xD = negative). Used for the wellbore file's lat/long fields.
+    """
+    digits = [byte & 0xF for byte in field]
+    sign_nibble = (field[-1] >> 4) & 0xF
+
+    value = int("".join(str(d) for d in digits))
+    if decimal_places:
+        value = value / (10**decimal_places)
+    return -value if sign_nibble == 0xD else value
 
 
 def iter_records(path: Path, record_length: int, chunk_records: int = 500_000):
