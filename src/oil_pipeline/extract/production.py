@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from oil_pipeline.utils import RECORD_LENGTH, decode_text, unpack_comp3
+from oil_pipeline.utils import decode_text, iter_records, unpack_comp3
 
 logger = logging.getLogger(__name__)
 
-CHUNK_RECORDS = 500_000  # records read per chunk while streaming (~51 MB/chunk); bounds memory use
+RECORD_LENGTH = 102  # bytes; PDF100.ebc fixed physical record length (pda001.pdf)
 
 SEGMENT_NAMES = {
     "01": "PDROOT (Root Segment)",
@@ -34,18 +34,6 @@ SEGMENT_NAMES = {
     "23": "PDODSPRK (Oil Disposition Remarks)",
     "24": "PDOCMGRK (Oil Commingle Disposition Remarks)",
 }
-
-
-def iter_records(path: Path, record_length: int = RECORD_LENGTH, chunk_records: int = CHUNK_RECORDS):
-    """Stream fixed-length records from disk, one chunk_records-sized read at a time."""
-    chunk_bytes = chunk_records * record_length
-    with path.open("rb") as f:
-        while True:
-            chunk = f.read(chunk_bytes)
-            if not chunk:
-                return
-            for i in range(0, len(chunk), record_length):
-                yield chunk[i : i + record_length]
 
 
 def parse_root(record: bytes) -> dict:
@@ -145,7 +133,7 @@ def load_pdf100(path: Path, progress_every: int | None = 2_000_000) -> dict[str,
     current_cycle_key = None  # rpt_cycle_key_yymm of the most recent Reporting Cycle segment
 
     n = 0
-    for record in iter_records(path):
+    for record in iter_records(path, RECORD_LENGTH):
         n += 1
         key = decode_text(record[0:2])
         key_tally[key] += 1

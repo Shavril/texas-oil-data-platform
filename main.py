@@ -12,14 +12,24 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from oil_pipeline.extract import load_pdf100
+from oil_pipeline.extract.p4_operators import load_p4f606
+from oil_pipeline.extract.p5_organizations import load_orf850
+from oil_pipeline.extract.production import load_pdf100
 from oil_pipeline.load.bigquery import load_parquet_to_bigquery, run_bigquery_sql
 from oil_pipeline.load.duckdb import save_tables
 from oil_pipeline.load.gcs import upload_to_gcs
 from oil_pipeline.load.parquet import save_parquet
-from oil_pipeline.transform import VIEW_QUERIES, build_district_lookup_sql, build_view_sql, transform
+from oil_pipeline.transform import (
+    VIEW_QUERIES,
+    build_district_lookup_sql,
+    build_lease_operators,
+    build_oil_production,
+    build_view_sql,
+)
 
 RAW_DATA_PATH = Path(__file__).parent / "data" / "raw" / "production" / "PDF100.ebc"
+P4_DATA_PATH = Path(__file__).parent / "data" / "raw" / "operators" / "p4f606.ebc"
+P5_DATA_PATH = Path(__file__).parent / "data" / "raw" / "organizations" / "orf850.ebc"
 DB_PATH = Path(__file__).parent / "data" / "database" / "pdf100.duckdb"
 PROCESSED_DATA_PATH = Path(__file__).parent / "data" / "processed"
 
@@ -49,39 +59,70 @@ def load_from_raw_to_duckdb() -> Path:
     return DB_PATH
 
 
-def transform_duckdb_to_analytics_tables(db_path: Path) -> dict[str, pd.DataFrame]:
-    analytics_tables = transform(db_path)
-
+def load_p4_to_duckdb() -> None:
+    p4_results = load_p4f606(P4_DATA_PATH)
     print()
-    for name, df in analytics_tables.items():
-        print(f"{name}: {len(df):,} rows")
+    print(f"P4 Root (oil + gas leases): {len(p4_results['root']):,}")
+    save_tables({"p4_root": p4_results["root"]}, DB_PATH)
+    print(f"Saved p4_root table to {DB_PATH}")
 
-    save_tables(analytics_tables, db_path)
+
+def load_p5_to_duckdb() -> None:
+    p5_results = load_orf850(P5_DATA_PATH)
     print()
-    print(f"Saved analytics tables to {db_path}")
-    return analytics_tables
+    print(f"P5 Organizations:           {len(p5_results['organizations']):,}")
+    save_tables({"p5_organizations": p5_results["organizations"]}, DB_PATH)
+    print(f"Saved p5_organizations table to {DB_PATH}")
 
 
-def save_analytics_to_parquet(analytics_tables: dict[str, pd.DataFrame]) -> dict[str, Path]:
-    parquet_paths = save_parquet(analytics_tables, PROCESSED_DATA_PATH)
-
+def transform_oil_production(db_path: Path) -> pd.DataFrame:
+    df = build_oil_production(db_path)
     print()
-    for name, path in parquet_paths.items():
-        print(f"Wrote {name} -> {path}")
+    print(f"oil_production: {len(df):,} rows")
+    save_tables({"oil_production": df}, db_path)
+    print(f"Saved oil_production table to {db_path}")
+    return df
 
-    return parquet_paths
 
-
-def upload_parquet_to_gcs(parquet_paths: dict[str, Path]) -> dict[str, str]:
-    gcs_uris = {}
+def transform_lease_operators(db_path: Path) -> pd.DataFrame:
+    df = build_lease_operators(db_path)
     print()
-    for name, path in parquet_paths.items():
-        blob_name = f"{name}.parquet"
-        upload_to_gcs(path, GCS_BUCKET_NAME, blob_name, project=GCP_PROJECT_ID)
-        gcs_uris[name] = f"gs://{GCS_BUCKET_NAME}/{blob_name}"
-        print(f"Uploaded {path} -> {gcs_uris[name]}")
+    print(f"lease_operators: {len(df):,} rows")
+    save_tables({"lease_operators": df}, db_path)
+    print(f"Saved lease_operators table to {db_path}")
+    return df
 
-    return gcs_uris
+
+def save_oil_production_to_parquet(df: pd.DataFrame) -> Path:
+    paths = save_parquet({"oil_production": df}, PROCESSED_DATA_PATH)
+    print()
+    print(f"Wrote oil_production -> {paths['oil_production']}")
+    return paths["oil_production"]
+
+
+def save_lease_operators_to_parquet(df: pd.DataFrame) -> Path:
+    paths = save_parquet({"lease_operators": df}, PROCESSED_DATA_PATH)
+    print()
+    print(f"Wrote lease_operators -> {paths['lease_operators']}")
+    return paths["lease_operators"]
+
+
+def upload_oil_production_to_gcs(path: Path) -> str:
+    blob_name = "oil_production.parquet"
+    upload_to_gcs(path, GCS_BUCKET_NAME, blob_name, project=GCP_PROJECT_ID)
+    gcs_uri = f"gs://{GCS_BUCKET_NAME}/{blob_name}"
+    print()
+    print(f"Uploaded {path} -> {gcs_uri}")
+    return gcs_uri
+
+
+def upload_lease_operators_to_gcs(path: Path) -> str:
+    blob_name = "lease_operators.parquet"
+    upload_to_gcs(path, GCS_BUCKET_NAME, blob_name, project=GCP_PROJECT_ID)
+    gcs_uri = f"gs://{GCS_BUCKET_NAME}/{blob_name}"
+    print()
+    print(f"Uploaded {path} -> {gcs_uri}")
+    return gcs_uri
 
 
 def load_gcs_to_bigquery(gcs_uris: dict[str, str]) -> None:
@@ -109,20 +150,30 @@ def create_analytics_views() -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    # Load the files into DuckDB
+    # Load the oil production raw data into DuckDB
     db_path = load_from_raw_to_duckdb()
+    # Load P-4 operator raw data into DuckDB
+    load_p4_to_duckdb()
+    # Load P-5 organization raw data into DuckDB
+    load_p5_to_duckdb()
 
     # Transform into analytics-ready tables
-    analytics_tables = transform_duckdb_to_analytics_tables(db_path)
+    oil_production_df = transform_oil_production(db_path)
+    lease_operators_df = transform_lease_operators(db_path)
 
     # Save analytics tables locally as Parquet
-    parquet_paths = save_analytics_to_parquet(analytics_tables)
+    oil_production_parquet_path = save_oil_production_to_parquet(oil_production_df)
+    lease_operators_parquet_path = save_lease_operators_to_parquet(lease_operators_df)
 
     # Upload the Parquet files to GCS
-    gcs_uris = upload_parquet_to_gcs(parquet_paths)
+    oil_production_gcs_uri = upload_oil_production_to_gcs(oil_production_parquet_path)
+    lease_operators_gcs_uri = upload_lease_operators_to_gcs(lease_operators_parquet_path)
 
     # Load from GCS into BigQuery
-    load_gcs_to_bigquery(gcs_uris)
+    load_gcs_to_bigquery({
+        "oil_production": oil_production_gcs_uri,
+        "lease_operators": lease_operators_gcs_uri,
+    })
 
     # Create/refresh the small static district code/name lookup table
     create_district_lookup_table()

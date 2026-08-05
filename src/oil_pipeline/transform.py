@@ -77,29 +77,43 @@ SELECT * FROM UNNEST([
 # so an unmapped district code would surface as a null district_name rather
 # than silently dropping the row.
 
-OIL_PRODUCTION_VIOLATIONS_VIEW_QUERY = """SELECT
-    CONCAT(p.district_code, '-', p.lease_nbr) AS lease_id,
+OIL_PRODUCTION_VIOLATIONS_VIEW_QUERY = """WITH p AS (
+    SELECT *, CONCAT(district_code, '-', lease_nbr) AS lease_id
+    FROM `{table}`
+)
+SELECT
+    p.lease_id,
     p.rrc_district_id,
     d.district_name,
+    lo.operator_number,
+    lo.organization_name,
     p.report_month,
     p.oil_production_bbl,
     p.oil_allowable_cycle_bbls,
     p.present_oil_status_bbl AS cumulative_overproduction_bbl,
     SAFE_DIVIDE(p.oil_production_bbl, NULLIF(p.oil_allowable_cycle_bbls, 0)) AS allowable_utilization_ratio
-FROM `{table}` p
+FROM p
 LEFT JOIN `{districts_table}` d ON p.rrc_district_id = d.rrc_district_id
+LEFT JOIN `{lease_operators_table}` lo ON p.lease_id = lo.lease_id
 WHERE p.present_oil_status_bbl > 0
 ORDER BY p.present_oil_status_bbl DESC"""
 
-TOTAL_OIL_PRODUCTION_BY_LEASE_ID_VIEW_QUERY = """SELECT
-  CONCAT(p.district_code, '-', p.lease_nbr) AS lease_id,
+TOTAL_OIL_PRODUCTION_BY_LEASE_ID_VIEW_QUERY = """WITH p AS (
+  SELECT *, CONCAT(district_code, '-', lease_nbr) AS lease_id
+  FROM `{table}`
+)
+SELECT
+  p.lease_id,
   p.district_code,
   d.district_name,
+  lo.operator_number,
+  lo.organization_name,
   SUM(p.oil_production_bbl) AS total_oil_production_bbl
-FROM `{table}` p
+FROM p
 LEFT JOIN `{districts_table}` d ON p.district_code = d.district_code
-GROUP BY lease_id, p.district_code, d.district_name
-ORDER BY lease_id, p.district_code ASC"""
+LEFT JOIN `{lease_operators_table}` lo ON p.lease_id = lo.lease_id
+GROUP BY p.lease_id, p.district_code, d.district_name, lo.operator_number, lo.organization_name
+ORDER BY p.lease_id, p.district_code ASC"""
 
 TOTAL_OIL_PRODUCTION_BY_MONTH_AND_DISTRICT_CODE_VIEW_QUERY = """SELECT
   p.report_month,
@@ -126,11 +140,13 @@ def build_view_sql(
     view_name: str,
     source_table: str = "oil_production",
     districts_table: str = "rrc_districts",
+    lease_operators_table: str = "lease_operators",
 ) -> str:
     """Build a CREATE OR REPLACE VIEW statement for one of the VIEW_QUERIES definitions."""
     query = VIEW_QUERIES[view_name].format(
         table=f"{project}.{dataset}.{source_table}",
         districts_table=f"{project}.{dataset}.{districts_table}",
+        lease_operators_table=f"{project}.{dataset}.{lease_operators_table}",
     )
     return f"CREATE OR REPLACE VIEW `{project}.{dataset}.{view_name}` AS\n{query}"
 
@@ -175,8 +191,40 @@ def build_oil_production(db_path: Path) -> pd.DataFrame:
     return df
 
 
+def build_lease_operators(db_path: Path) -> pd.DataFrame:
+    """Join P-4 Root (oil leases only) to P-5 Organization on operator_number.
+
+    Grain: one row per oil lease (district_code, lease_nbr). P-4 Root also
+    contains gas wells (oil_gas_code = 'G') — filtered out here, since the
+    production tape is oil-only and a gas well could otherwise coincidentally
+    share a (district_code, lease_nbr) with an oil lease (see
+    docs/data_p4_operators.md Known Issues).
+
+    LEFT JOIN to P-5 so a lease whose operator number has no matching P-5
+    organization record surfaces as a null organization_name rather than
+    silently dropping the lease.
+    """
+    with duckdb.connect(str(db_path), read_only=True) as con:
+        df = con.execute("""
+            SELECT
+                p4.district_code,
+                p4.lease_nbr,
+                CONCAT(p4.district_code, '-', p4.lease_nbr) AS lease_id,
+                p4.operator_number,
+                p5.organization_name,
+                p5.p5_status
+            FROM p4_root p4
+            LEFT JOIN p5_organizations p5
+              ON p4.operator_number = p5.operator_number
+            WHERE p4.oil_gas_code = 'O'
+        """).fetchdf()
+
+    return df
+
+
 def transform(db_path: Path) -> dict[str, pd.DataFrame]:
     """Build all analytics-ready tables from the raw DuckDB segment tables."""
     return {
         "oil_production": build_oil_production(db_path),
+        "lease_operators": build_lease_operators(db_path),
     }
