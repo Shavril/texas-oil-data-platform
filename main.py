@@ -183,7 +183,7 @@ def create_district_lookup_table() -> None:
 
 def create_analytics_views() -> None:
     print()
-    for view_name in VIEW_QUERIES:
+    for view_name in VIEW_DEFINITIONS:
         sql = build_view_sql(GCP_PROJECT_ID, BQ_DATASET, view_name)
         run_bigquery_sql(sql, project=GCP_PROJECT_ID)
         print(f"Created {GCP_PROJECT_ID}.{BQ_DATASET}.{view_name}")
