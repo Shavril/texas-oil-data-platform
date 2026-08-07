@@ -12,6 +12,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
+from oil_pipeline.config import get_settings
 from oil_pipeline.extract.p4_operators import load_p4f606
 from oil_pipeline.extract.p5_organizations import load_orf850
 from oil_pipeline.extract.production import load_pdf100
@@ -37,16 +38,18 @@ from oil_pipeline.validation.transformed import (
     validate_wells,
 )
 
-RAW_DATA_PATH = Path(__file__).parent / "data" / "raw" / "production" / "PDF100.ebc"
-P4_DATA_PATH = Path(__file__).parent / "data" / "raw" / "operators" / "p4f606.ebc"
-P5_DATA_PATH = Path(__file__).parent / "data" / "raw" / "organizations" / "orf850.ebc"
-WELLS_DATA_PATH = Path(__file__).parent / "data" / "raw" / "wells" / "dbf900.ebc"
-DB_PATH = Path(__file__).parent / "data" / "database" / "analytics.duckdb"
-PROCESSED_DATA_PATH = Path(__file__).parent / "data" / "processed"
+settings = get_settings()
 
-GCP_PROJECT_ID = "texas-oil-data-platform"
-GCS_BUCKET_NAME = "texas-oil-data-platform"
-BQ_DATASET = "analytics"
+RAW_DATA_PATH = settings.raw_production_path
+P4_DATA_PATH = settings.raw_p4_path
+P5_DATA_PATH = settings.raw_p5_path
+WELLS_DATA_PATH = settings.raw_wells_path
+DB_PATH = settings.db_path
+PROCESSED_DATA_PATH = settings.processed_data_path
+
+GCP_PROJECT_ID = settings.gcp_project_id
+GCS_BUCKET_NAME = settings.gcs_bucket_name
+BQ_DATASET = settings.bq_dataset
 
 
 def load_from_raw_to_duckdb() -> Path:
