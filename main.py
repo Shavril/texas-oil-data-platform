@@ -23,8 +23,19 @@ from oil_pipeline.load.parquet import save_parquet
 from oil_pipeline.transform.districts import build_district_lookup_sql
 from oil_pipeline.transform.lease_operators import build_lease_operators
 from oil_pipeline.transform.oil_production import build_oil_production
-from oil_pipeline.transform.views import VIEW_QUERIES, build_view_sql
+from oil_pipeline.transform.views import VIEW_DEFINITIONS, build_view_sql
 from oil_pipeline.transform.wells import build_wells
+from oil_pipeline.validation.raw import (
+    validate_p4_raw,
+    validate_p5_raw,
+    validate_production_raw,
+    validate_wells_raw,
+)
+from oil_pipeline.validation.transformed import (
+    validate_lease_operators,
+    validate_oil_production,
+    validate_wells,
+)
 
 RAW_DATA_PATH = Path(__file__).parent / "data" / "raw" / "production" / "PDF100.ebc"
 P4_DATA_PATH = Path(__file__).parent / "data" / "raw" / "operators" / "p4f606.ebc"
@@ -41,7 +52,7 @@ BQ_DATASET = "analytics"
 def load_from_raw_to_duckdb() -> Path:
     # Load the files into DuckDB
 
-    results = load_pdf100(RAW_DATA_PATH)
+    results = validate_production_raw(load_pdf100(RAW_DATA_PATH))
 
     print()
     print("Record type breakdown:")
@@ -60,7 +71,7 @@ def load_from_raw_to_duckdb() -> Path:
 
 
 def load_p4_to_duckdb() -> None:
-    p4_results = load_p4f606(P4_DATA_PATH)
+    p4_results = validate_p4_raw(load_p4f606(P4_DATA_PATH))
     print()
     print(f"P4 Root (oil + gas leases): {len(p4_results['root']):,}")
     save_tables({"p4_root": p4_results["root"]}, DB_PATH)
@@ -68,7 +79,7 @@ def load_p4_to_duckdb() -> None:
 
 
 def load_p5_to_duckdb() -> None:
-    p5_results = load_orf850(P5_DATA_PATH)
+    p5_results = validate_p5_raw(load_orf850(P5_DATA_PATH))
     print()
     print(f"P5 Organizations:           {len(p5_results['organizations']):,}")
     save_tables({"p5_organizations": p5_results["organizations"]}, DB_PATH)
@@ -76,7 +87,7 @@ def load_p5_to_duckdb() -> None:
 
 
 def load_wells_to_duckdb() -> None:
-    wells_results = load_dbf900(WELLS_DATA_PATH)
+    wells_results = validate_wells_raw(load_dbf900(WELLS_DATA_PATH))
     print()
     print(f"Wells Root:               {len(wells_results['root']):,}")
     print(f"Wells Completion:         {len(wells_results['completion']):,}")
@@ -93,7 +104,7 @@ def load_wells_to_duckdb() -> None:
 
 
 def transform_oil_production(db_path: Path) -> pd.DataFrame:
-    df = build_oil_production(db_path)
+    df = validate_oil_production(build_oil_production(db_path))
     print()
     print(f"oil_production: {len(df):,} rows")
     save_tables({"oil_production": df}, db_path)
@@ -102,7 +113,7 @@ def transform_oil_production(db_path: Path) -> pd.DataFrame:
 
 
 def transform_lease_operators(db_path: Path) -> pd.DataFrame:
-    df = build_lease_operators(db_path)
+    df = validate_lease_operators(build_lease_operators(db_path))
     print()
     print(f"lease_operators: {len(df):,} rows")
     save_tables({"lease_operators": df}, db_path)
@@ -111,7 +122,7 @@ def transform_lease_operators(db_path: Path) -> pd.DataFrame:
 
 
 def transform_wells(db_path: Path) -> pd.DataFrame:
-    df = build_wells(db_path)
+    df = validate_wells(build_wells(db_path))
     print()
     print(f"wells: {len(df):,} rows")
     save_tables({"wells": df}, db_path)
