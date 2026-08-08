@@ -233,6 +233,12 @@ data/database/**
 !data/database/**/
 !data/database/**/.gitkeep
 
+# Dagster (Texas Oil Data Platform)
+#   Local run/event storage. `dagster dev`/`dagster definitions validate`
+#   create a throwaway one of these per invocation unless DAGSTER_HOME is set.
+.tmp_dagster_home_*/
+.dagster_home/
+
 # Project processed data (Texas Oil Data Platform)
 #   Parquet outputs are regenerable from the DuckDB tables (see
 #   oil_pipeline/load.py) — never commit them, but keep the folder
