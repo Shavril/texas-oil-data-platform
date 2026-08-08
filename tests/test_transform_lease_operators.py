@@ -59,3 +59,32 @@ def test_build_lease_operators_left_join_keeps_unmatched_operator(tmp_path: Path
 
     assert len(df) == 1
     assert pd.isna(df.iloc[0]["organization_name"])
+
+
+def test_build_lease_operators_dedupes_duplicate_root_records(tmp_path: Path):
+    # Real data: P-4 Root can contain exact duplicate records for the same
+    # oil lease (confirmed on real data) -- must still collapse to one row
+    # per lease (this table's documented grain), picking the lowest
+    # operator_number deterministically if they ever differ.
+    db_path = tmp_path / "analytics.duckdb"
+    p4_root = pd.DataFrame(
+        {
+            "district_code": ["08", "08"],
+            "lease_nbr": ["003753", "003753"],
+            "oil_gas_code": ["O", "O"],
+            "operator_number": ["685350", "685350"],
+        }
+    )
+    p5_organizations = pd.DataFrame(
+        {
+            "operator_number": ["685350"],
+            "organization_name": ["Acme Oil"],
+            "p5_status": ["A"],
+        }
+    )
+    _seed(db_path, p4_root, p5_organizations)
+
+    df = build_lease_operators(db_path)
+
+    assert len(df) == 1
+    assert df.iloc[0]["lease_id"] == "08-003753"

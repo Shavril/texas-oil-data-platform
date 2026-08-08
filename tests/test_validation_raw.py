@@ -106,6 +106,23 @@ def test_p4_raw_valid_passes():
     assert len(result["root"]) == 2
 
 
+def test_p4_raw_duplicate_root_record_warns_not_raises():
+    # Real data: the tape can contain exact duplicate root records for the
+    # same (oil_gas_code, district_code, lease_nbr) -- confirmed on real
+    # data, not decode corruption, so this must not halt the pipeline.
+    tables = _p4_tables()
+    tables["root"] = pd.DataFrame(
+        {
+            "oil_gas_code": ["G", "G"],
+            "district_code": ["08", "08"],
+            "lease_nbr": ["003753", "003753"],
+            "operator_number": ["685350", "685350"],
+        }
+    )
+    result = validate_p4_raw(tables)  # must not raise
+    assert len(result["root"]) == 2
+
+
 def test_p4_raw_invalid_oil_gas_code_raises():
     tables = _p4_tables()
     tables["root"] = pd.DataFrame(
@@ -200,6 +217,36 @@ def _wells_tables(**overrides):
 def test_wells_raw_valid_passes():
     result = validate_wells_raw(_wells_tables())
     assert len(result["root"]) == 2
+
+
+def test_wells_raw_space_padded_total_depth_passes():
+    # Real data: some records are right-justified/space-padded rather than
+    # zero-padded (e.g. "    0" for a well with no recorded depth).
+    tables = _wells_tables()
+    tables["root"] = pd.DataFrame(
+        {
+            "api_number": ["42012345"],
+            "field_district": ["08"],
+            "orig_compl_year": ["1998"],
+            "total_depth": ["    0"],
+        }
+    )
+    result = validate_wells_raw(tables)  # must not raise
+    assert len(result["root"]) == 1
+
+
+def test_wells_raw_non_numeric_total_depth_raises():
+    tables = _wells_tables()
+    tables["root"] = pd.DataFrame(
+        {
+            "api_number": ["42012345"],
+            "field_district": ["08"],
+            "orig_compl_year": ["1998"],
+            "total_depth": ["ABCDE"],
+        }
+    )
+    with pytest.raises(ValidationError):
+        validate_wells_raw(tables)
 
 
 def test_wells_raw_bad_api_number_length_raises():

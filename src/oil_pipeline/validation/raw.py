@@ -93,10 +93,22 @@ _P4_ROOT_SCHEMA = DataFrameSchema(
         # populate it -- soft, not hard.
         "operator_number": Column(str, not_blank(raise_warning=True), coerce=True),
     },
-    # oil_gas_code is part of the grain: docs/data_p4_operators.md notes the
-    # file mixes oil+gas records, and a gas well can coincidentally share a
-    # (district_code, lease_nbr) with an oil lease.
-    unique=["oil_gas_code", "district_code", "lease_nbr"],
+    checks=[
+        # oil_gas_code is part of the intended grain: docs/data_p4_operators.md
+        # notes the file mixes oil+gas records, and a gas well can
+        # coincidentally share a (district_code, lease_nbr) with an oil
+        # lease. But confirmed against real data: the tape itself contains
+        # exact duplicate root records for the same lease (byte-identical,
+        # same operator_number) -- a genuine source-data quirk, not decode
+        # corruption, so soft rather than hard. build_lease_operators
+        # dedupes defensively downstream to guarantee its one-row-per-lease
+        # grain regardless.
+        Check(
+            lambda df: ~df.duplicated(subset=["oil_gas_code", "district_code", "lease_nbr"]),
+            raise_warning=True,
+            error="(oil_gas_code, district_code, lease_nbr) repeats",
+        )
+    ],
 )
 
 
@@ -163,7 +175,13 @@ _WELLS_ROOT_SCHEMA = DataFrameSchema(
             str, Check(lambda s: s.str.strip().ne(""), raise_warning=True), coerce=True
         ),
         "orig_compl_year": Column(str, Check.str_matches(r"^\d{4}$"), coerce=True),
-        "total_depth": Column(str, Check.str_matches(r"^\d+$"), coerce=True),
+        # Right-justified/space-padded rather than zero-padded on a small
+        # subset of real records (confirmed: 37 of 1,211,829 root records,
+        # e.g. "    0") -- DuckDB's CAST(... AS INTEGER) in transform/wells.py
+        # already tolerates this padding, so strip before checking digits.
+        "total_depth": Column(
+            str, Check(lambda s: s.str.strip().str.match(r"^\d+$"), error="numeric_after_strip"), coerce=True
+        ),
     },
 )
 
